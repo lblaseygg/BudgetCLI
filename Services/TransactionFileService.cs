@@ -41,4 +41,22 @@ public class TransactionFileService
         await using var stream = File.Create(_filePath);
         await JsonSerializer.SerializeAsync(stream, transactions, _jsonOptions);
     }
+
+    public async Task<bool> DeleteAsync(Guid id)
+    {
+        var transactions = await GetAllAsync();
+        var transactionToRemove = transactions.FirstOrDefault(t => t.Id == id);
+
+        if (transactionToRemove is null)
+            return false;
+
+        transactions.Remove(transactionToRemove);
+
+        Directory.CreateDirectory(Path.GetDirectoryName(_filePath)!);
+
+        await using var stream = File.Create(_filePath);
+        await JsonSerializer.SerializeAsync(stream, transactions, _jsonOptions);
+
+        return true;
+    }
 }
