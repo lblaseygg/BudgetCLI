@@ -25,6 +25,22 @@ var typeOption = new Option<string>("--type", "-t")
 };
 typeOption.AcceptOnlyFromAmong("income", "expense");
 
+var categoryFilterOption = new Option<string>("--category", "-c")
+{
+    Description = "Filter by category"
+};
+
+categoryFilterOption.AcceptOnlyFromAmong(
+    Enum.GetNames<Category>().Select(name => name.ToLower()).ToArray()
+);
+
+var monthFilterOption = new Option<int>("--month", "-m")
+{
+    Description = "Filter by month (1-12)",
+    DefaultValueFactory = _ => 0
+};
+
+// command definitions
 var addCommand = new Command("add", "Add a transaction");
 addCommand.Options.Add(descriptionOption);
 addCommand.Options.Add(amountOption);
@@ -35,6 +51,11 @@ addCommand.SetAction(async parseResult =>
     var description = parseResult.GetRequiredValue(descriptionOption);
     var amount = parseResult.GetRequiredValue(amountOption);
     var typeText = parseResult.GetRequiredValue(typeOption);
+    var selectedCategory = AnsiConsole.Prompt(
+        new SelectionPrompt<Category>()
+            .Title("Select a [green]category[/]:")
+            .AddChoices(Enum.GetValues<Category>())
+    );
 
     if (amount <= 0)
     {
@@ -46,7 +67,8 @@ addCommand.SetAction(async parseResult =>
     {
         Description = description,
         Amount = amount,
-        Type = Enum.Parse<TransactionType>(typeText, true)
+        Type = Enum.Parse<TransactionType>(typeText, true),
+        Category = selectedCategory
     };
 
     await transactionService.AddAsync(transaction);
@@ -60,14 +82,39 @@ addCommand.SetAction(async parseResult =>
 
 
 var listCommand = new Command("list", "List all transactions");
+listCommand.Options.Add(categoryFilterOption);
+listCommand.Options.Add(monthFilterOption);
 
 listCommand.SetAction(async parseResult =>
 {
     var transactions = await transactionService.GetAllAsync();
+    var categoryFilter = parseResult.GetValue(categoryFilterOption);
+    var monthFilter = parseResult.GetValue(monthFilterOption);
+
+    if (monthFilter is < 0 or > 12)
+    {
+        AnsiConsole.MarkupLine("[red]Invalid month filter. Must be between 1 and 12.[/]");
+        return 1;
+    }
+
+    if (!string.IsNullOrWhiteSpace(categoryFilter))
+    {
+        var selectedCategory = Enum.Parse<Category>(categoryFilter, true);
+        transactions = transactions
+            .Where(t => t.Category == selectedCategory)
+            .ToList();
+    }
+
+    if (monthFilter > 0)
+    {
+        transactions = transactions
+            .Where(t => t.Date.Month == monthFilter)
+            .ToList();
+    }
 
     if (transactions.Count == 0)
     {
-        AnsiConsole.MarkupLine("[red]No transactions found.[/]");
+        AnsiConsole.MarkupLine("[yellow]No transactions found.[/]");
         return 0;
     }
     
@@ -78,9 +125,8 @@ listCommand.SetAction(async parseResult =>
     table.AddColumn(new TableColumn("[grey]date[/]"));
     table.AddColumn(new TableColumn("[grey]description[/]"));
     table.AddColumn(new TableColumn("[grey]type[/]"));
+    table.AddColumn(new TableColumn("[grey]category[/]"));
     table.AddColumn(new TableColumn("[grey]amount[/]") { Alignment = Justify.Right });
-
-
 
     foreach (var transaction in transactions.OrderByDescending(t => t.Date))
     {
@@ -93,14 +139,15 @@ listCommand.SetAction(async parseResult =>
             $"[grey]{transaction.Date:MM/dd/yy}[/]",
             transaction.Description,
             $"[grey]{typeText}[/]",
+            $"[grey]{transaction.Category.ToString().ToLower()}[/]",
             $"[{amountColor}]${transaction.Amount:F2}[/]"
         );
     }
 
-    
     AnsiConsole.Write(table);
     return 0;
 });
+
 
 var idOption = new Option<Guid>("--id", "-i")
 {
